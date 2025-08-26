@@ -1,5 +1,5 @@
 # data_loader.py
-
+import os
 import zipfile
 from pathlib import Path
 from typing import Optional
@@ -8,11 +8,12 @@ import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 
-from src.constants import URL_DWD_WIND_DATA, REMOTE_PATH_DWD_HISTORICAL, LOCAL_DATA_FOLDER, LOCAL_HISTORICAL_FOLDER, \
-    WIND_DATA_FILE_PREFIX, DWDFormat, DWDColumnNames, DataFrameFormat, STATION_ID_HELGOLAND
+from src.constants import URL_DWD_WIND_DATA, REMOTE_PATH_DWD_HISTORICAL, LOCAL_DATA_FOLDER, LOCAL_RAW_DATA_DWD_FOLDER, \
+    WIND_DATA_FILE_PREFIX, DWDFormat, DWDColumnNames, WindDataFrameFormat, STATION_ID_HELGOLAND, \
+    LOCAL_PROCESSED_DATA_FOLDER, PROCESSED_DATA_PREFIX
+from src.utils import get_path, ensure_dir_exists, build_filename, save_as_csv
 
 
-# Version 1: Web scraping
 def find_station_file_url_web_scraping(station_id: str, base_url: str = URL_DWD_WIND_DATA) -> str | None:
     """Finds station file URL via web scraping"""
     try:
@@ -38,11 +39,11 @@ def find_station_file_url_web_scraping(station_id: str, base_url: str = URL_DWD_
 
 def download_station_data_web_scraping(url: str) -> Path:
     """Downloads zip file if not already present. Creates folder structure."""
-    local_historical_path = Path(LOCAL_DATA_FOLDER) / LOCAL_HISTORICAL_FOLDER
-    local_historical_path.mkdir(parents=True, exist_ok=True)
-
     zip_name = url.split("/")[-1]
-    zip_path = local_historical_path / zip_name
+
+    dwd_historical_dir = get_path(LOCAL_DATA_FOLDER, LOCAL_RAW_DATA_DWD_FOLDER)
+
+    zip_path = dwd_historical_dir / zip_name
 
     if zip_path.exists():
         print(f"File already exists: {zip_path}")
@@ -56,29 +57,30 @@ def download_station_data_web_scraping(url: str) -> Path:
     return zip_path
 
 
-# Version 2: Wetterdienst Package
-def find_station_file_url_wetterdienst(station_id):
-    # TODO: Implement function that use the wetterdienst package
-    pass
-
-
 def extract_txt_files_from_zip(zip_path: Path) -> list[Path] | None:
     """Extract zip data with txt ending und returns a list of local txt path"""
     zip_path = Path(zip_path)
     extract_to_folder = zip_path.with_suffix("")
-    print(extract_to_folder)
-    extract_to_folder.mkdir(parents=True, exist_ok=True)
+    ensure_dir_exists(extract_to_folder)
 
-    with zipfile.ZipFile(zip_path, mode="r") as zip_file:
-        txt_file_list = [file for file in zip_file.namelist() if file.endswith(".txt")]
+    txt_files_in_folder = list(extract_to_folder.glob("*.txt"))
+    txt_folder_filenames = {file.name for file in txt_files_in_folder}
 
-        if txt_file_list:
-            zip_file.extractall(path=extract_to_folder, members=txt_file_list)
-            return [extract_to_folder / txt_file for txt_file in txt_file_list]
-        else:
-            print("No txt data found!")
-            return None
+    try:
+        with zipfile.ZipFile(zip_path, mode="r") as zip_file:
+            txt_files_in_zip = [file for file in zip_file.namelist() if file.endswith(".txt")]
 
+            if txt_files_in_zip:
+                if not txt_files_in_folder or  (txt_folder_filenames != set(txt_files_in_zip)):
+                    print("Extracting all txt files")
+                    zip_file.extractall(path=extract_to_folder, members=txt_files_in_zip)
+                return [extract_to_folder / txt_file for txt_file in txt_files_in_zip]
+            else:
+                print("No txt data found!")
+                return None
+    except Exception as e:
+        print(f"Error: {e}")
+        return None
 
 def find_wind_data_file(txt_file_list: list[Path]) -> Path | None:
     """Find the wind data txt in all extracted txt files"""
@@ -114,26 +116,25 @@ def parse_wind_data_txt_to_dataframe(txt_file_path: Path) -> pd.DataFrame:
         usecols=lambda x: x != DWDFormat.END_OF_ROW,
         skipinitialspace=True
     )
-    df[DataFrameFormat.INDEX] = pd.to_datetime(df[DWDColumnNames.MEASURE_DATE], format=DWDFormat.DATE_FORMAT)
-    df = df.set_index(DataFrameFormat.INDEX)
+    df[WindDataFrameFormat.INDEX] = pd.to_datetime(df[DWDColumnNames.MEASURE_DATE], format=DWDFormat.DATE_FORMAT)
+    df = df.set_index(WindDataFrameFormat.INDEX)
     df.rename(columns={
-        DWDColumnNames.STATION_ID: DataFrameFormat.STATION_ID,
-        DWDColumnNames.MEASURE_DATE: DataFrameFormat.MEASURE_DATE,
-        DWDColumnNames.WIND_SPEED: DataFrameFormat.WIND_SPEED,
-        DWDColumnNames.WIND_DIRECTION: DataFrameFormat.WIND_DIRECTION
+        DWDColumnNames.STATION_ID: WindDataFrameFormat.STATION_ID,
+        DWDColumnNames.MEASURE_DATE: WindDataFrameFormat.MEASURE_DATE,
+        DWDColumnNames.WIND_SPEED: WindDataFrameFormat.WIND_SPEED,
+        DWDColumnNames.WIND_DIRECTION: WindDataFrameFormat.WIND_DIRECTION
     }, inplace=True)
     print(f"Wind data loaded: {len(df)} Measured values between {df.index.min()} and {df.index.max()}")
     print(df.head())
     return df
 
 
-def load_single_station_data(station_id: str, method="scraping") -> Optional[pd.DataFrame]:
+def load_single_station_data(station_id: str) -> Optional[pd.DataFrame]:
     """
     Orchestrates the data loading process for a single station id.
 
     Args:
         station_id: station id
-        method: scraping or wetterdienst
 
     Returns:
         DataFrame of wind data for station id
@@ -143,51 +144,46 @@ def load_single_station_data(station_id: str, method="scraping") -> Optional[pd.
     """
     print(f"Loading data for station: {station_id}")
 
-    if method == "scraping":
-        print("Find zip file for station...")
-        url_dwd_data = find_station_file_url_web_scraping(station_id)
-        if not url_dwd_data:
-            return None
+    print("Find zip file for station...")
+    url_dwd_data = find_station_file_url_web_scraping(station_id)
+    if not url_dwd_data:
+        return None
 
-        print("Download zip file for station...")
-        zip_path = download_station_data_web_scraping(url_dwd_data)
-        if not zip_path:
-            return None
+    print("Download zip file for station...")
+    zip_path = download_station_data_web_scraping(url_dwd_data)
+    if not zip_path:
+        return None
 
-        print("Extract txt files from zip for station...")
-        txt_files = extract_txt_files_from_zip(zip_path)
-        if not txt_files:
-            return None
+    print("Extract txt files from zip for station...")
+    txt_files = extract_txt_files_from_zip(zip_path)
+    if not txt_files:
+        return None
 
-        print("Find wind data file in extracted txt files...")
-        wind_data_file = find_wind_data_file(txt_files)
-        if not wind_data_file:
-            return None
+    print("Find wind data file in extracted txt files...")
+    wind_data_file = find_wind_data_file(txt_files)
+    if not wind_data_file:
+        return None
 
-        print("Parse and return wind data file to DataFrame...")
-        return parse_wind_data_txt_to_dataframe(wind_data_file)
+    print("Parse and return wind data file to DataFrame...")
+    return parse_wind_data_txt_to_dataframe(wind_data_file)
 
-    if method == "wetterdienst":
-        # TODO: Implement wetterdienst method in load_single_station_data
-        raise NotImplementedError("Wetterdienst method not yet implemented")
+def save_wind_data_to_csv(wind_df: pd.DataFrame, station_id: str):
+    start_year = wind_df.index.min().year
+    end_year = wind_df.index.max().year
+    filename = build_filename(PROCESSED_DATA_PREFIX, station_id, start_year, end_year)
+    file_path = get_path(LOCAL_DATA_FOLDER, LOCAL_PROCESSED_DATA_FOLDER)
+    save_as_csv(wind_df, file_path / filename)
 
-    else:
-        raise ValueError(f"Unknown method: {method}")
-
-
-def load_station_wind_data(station_ids: list[str] = None, method="scraping") -> dict[str, pd.DataFrame]:
+def load_station_wind_data(station_ids: list[str] = None, save_csv: bool=True) -> dict[str, pd.DataFrame]:
     """
     Load wind data for one or multiple weather stations.
 
     Args:
         station_ids: List of DWD station IDs. Defaults to Helgoland (02115)
-        method: Data loading method - 'scraping' or 'wetterdienst'
+        save_csv: If True, save processed data as CSV. Defaults to True
 
     Returns:
         Dictionary mapping station IDs to their wind data DataFrames
-
-    Raises:
-        ValueError: If unknown method is specified
     """
 
     if station_ids is None:
@@ -197,9 +193,11 @@ def load_station_wind_data(station_ids: list[str] = None, method="scraping") -> 
 
     for station_id in station_ids:
         try:
-            data = load_single_station_data(station_id, method)
+            data = load_single_station_data(station_id)
             if data is not None:
                 wind_data_results[station_id] = data
+                if save_csv:
+                    save_wind_data_to_csv(data, station_id)
             else:
                 print(f"Failed to load data for station {station_id}")
         except Exception as e:

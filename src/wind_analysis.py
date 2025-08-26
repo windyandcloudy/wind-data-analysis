@@ -4,61 +4,51 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-from src.constants import DataFrameFormat, AnnualStatsDataFrame, LOCAL_DATA_FOLDER, FILE_NAME_ANNUAL_STATISTICS
+from src.constants import WindDataFrameFormat, AnnualStatsDataFrame, LOCAL_DATA_FOLDER, FILE_NAME_ANNUAL_STATISTICS
 
 
-def calculate_annual_average_wind_speed(wind_df: pd.DataFrame) -> pd.Series:
-    return wind_df.groupby(wind_df.index.year)[DataFrameFormat.WIND_SPEED].mean()
+class DataQuality:
+    EXCELLENT = "Q1"
+    GOOD = "Q2"
+    POOR = "Q3"
+    UNRELIABLE = "Q4"
 
 
-def calculate_annual_median_wind_speed(wind_df: pd.DataFrame) -> pd.Series:
-    return wind_df.groupby(wind_df.index.year)[DataFrameFormat.WIND_SPEED].median()
+class DataQualityBoundaries:
+    EXCELLENT_TILL = 0.05
+    GOOD_TILL = 0.15
+    POOR_TILL = 0.3
 
 
-def calculate_annual_minimum_wind_speed(wind_df: pd.DataFrame) -> pd.Series:
-    return wind_df.groupby(wind_df.index.year)[DataFrameFormat.WIND_SPEED].min()
+def categorize_data_quality(missing_ratio):
+    if missing_ratio < DataQualityBoundaries.EXCELLENT_TILL:
+        return DataQuality.EXCELLENT
+    elif missing_ratio < DataQualityBoundaries.GOOD_TILL:
+        return DataQuality.GOOD
+    elif missing_ratio < DataQualityBoundaries.POOR_TILL:
+        return DataQuality.POOR
+    else:
+        return DataQuality.UNRELIABLE
 
 
-def calculate_annual_maximum_wind_speed(wind_df: pd.DataFrame) -> pd.Series:
-    return wind_df.groupby(wind_df.index.year)[DataFrameFormat.WIND_SPEED].max()
+def categorize_data_quality_for_series(missing_ratio_series: pd.Series):
+    return missing_ratio_series.map(categorize_data_quality)
 
 
-def calculate_annual_standard_deviation_wind_speed(wind_df: pd.DataFrame) -> pd.Series:
-    return wind_df.groupby(wind_df.index.year)[DataFrameFormat.WIND_SPEED].std()
-
-
-def calculate_circular_mean(wind_directions: pd.Series) -> float:
-    wind_radians = np.radians(wind_directions)
-    u_mean = np.cos(wind_radians).mean()
-    v_mean = np.sin(wind_radians).mean()
-    wind_average_direction_radian = np.arctan2(u_mean, v_mean)
-
-    return np.degrees(wind_average_direction_radian) % 360
-
-
-def calculate_annual_circular_average_direction(wind_df: pd.DataFrame) -> Optional[pd.Series]:
-    clean_wind_df = wind_df.dropna(subset=DataFrameFormat.WIND_DIRECTION)
-
-    if len(clean_wind_df) == 0:
-        return None
-
-    return clean_wind_df.groupby(clean_wind_df.index.year)[DataFrameFormat.WIND_DIRECTION].apply(
-        calculate_circular_mean)
+def calculate_data_missing_ratio(count_of_missing_values: pd.Series, expected_number_of_values: pd.Series):
+    return count_of_missing_values / expected_number_of_values
 
 
 def count_nan_values(series: pd.Series) -> int:
     return series.isna().sum()
 
 
-def count_both_nan_values(df: pd.DataFrame) -> int:
-    speed_nan = df[DataFrameFormat.WIND_SPEED].isna()
-    direction_nan = df[DataFrameFormat.WIND_DIRECTION].isna()
-    both_nan = speed_nan & direction_nan
-    return both_nan.sum()
-
-
 def count_total_values(series: pd.Series) -> int:
     return len(series)
+
+
+def calculate_missing_value_count(nan_values: pd.Series, total_values: pd.Series, expected_values: pd.Series):
+    return (expected_values - total_values) + nan_values
 
 
 def calculate_expected_hours_per_year(wind_df: pd.DataFrame) -> pd.Series:
@@ -74,22 +64,73 @@ def calculate_expected_hours_per_year(wind_df: pd.DataFrame) -> pd.Series:
     return pd.Series(expected_hours)
 
 
+def calculate_annual_average_wind_speed(wind_df: pd.DataFrame) -> pd.Series:
+    return wind_df.groupby(wind_df.index.year)[WindDataFrameFormat.WIND_SPEED].mean()
+
+
+def calculate_annual_median_wind_speed(wind_df: pd.DataFrame) -> pd.Series:
+    return wind_df.groupby(wind_df.index.year)[WindDataFrameFormat.WIND_SPEED].median()
+
+
+def calculate_annual_minimum_wind_speed(wind_df: pd.DataFrame) -> pd.Series:
+    return wind_df.groupby(wind_df.index.year)[WindDataFrameFormat.WIND_SPEED].min()
+
+
+def calculate_annual_maximum_wind_speed(wind_df: pd.DataFrame) -> pd.Series:
+    return wind_df.groupby(wind_df.index.year)[WindDataFrameFormat.WIND_SPEED].max()
+
+
+def calculate_annual_standard_deviation_wind_speed(wind_df: pd.DataFrame) -> pd.Series:
+    return wind_df.groupby(wind_df.index.year)[WindDataFrameFormat.WIND_SPEED].std()
+
+
+def calculate_circular_mean(wind_directions: pd.Series) -> float:
+    wind_radians = np.radians(wind_directions)
+    u_mean = np.cos(wind_radians).mean()
+    v_mean = np.sin(wind_radians).mean()
+    wind_average_direction_radian = np.arctan2(u_mean, v_mean)
+
+    return np.degrees(wind_average_direction_radian) % 360
+
+
+def calculate_annual_circular_average_direction(wind_df: pd.DataFrame) -> Optional[pd.Series]:
+    clean_wind_df = wind_df.dropna(subset=WindDataFrameFormat.WIND_DIRECTION)
+
+    if len(clean_wind_df) == 0:
+        return None
+
+    return clean_wind_df.groupby(clean_wind_df.index.year)[WindDataFrameFormat.WIND_DIRECTION].apply(
+        calculate_circular_mean)
+
+
 def get_annual_wind_statistics(wind_df: pd.DataFrame) -> pd.DataFrame:
     """Calculate comprehensive annual wind statistics"""
     expected_hours_per_year = calculate_expected_hours_per_year(wind_df)
-    nan_count_speed = wind_df.groupby(wind_df.index.year)[DataFrameFormat.WIND_SPEED].apply(count_nan_values)
-    total_values_speed = wind_df.groupby(wind_df.index.year)[DataFrameFormat.WIND_SPEED].apply(count_total_values)
-    nan_count_direction = wind_df.groupby(wind_df.index.year)[DataFrameFormat.WIND_DIRECTION].apply(count_nan_values)
-    total_values_direction = wind_df.groupby(wind_df.index.year)[DataFrameFormat.WIND_DIRECTION].apply(
+
+    speed_nan_count = wind_df.groupby(wind_df.index.year)[WindDataFrameFormat.WIND_SPEED].apply(count_nan_values)
+    speed_total_values = wind_df.groupby(wind_df.index.year)[WindDataFrameFormat.WIND_SPEED].apply(count_total_values)
+    speed_missing_values = calculate_missing_value_count(speed_nan_count, speed_total_values, expected_hours_per_year)
+    speed_missing_data_ratio = calculate_data_missing_ratio(speed_missing_values, expected_hours_per_year)
+    speed_data_quality = categorize_data_quality_for_series(speed_missing_data_ratio)
+
+    direction_nan_count = wind_df.groupby(wind_df.index.year)[WindDataFrameFormat.WIND_DIRECTION].apply(count_nan_values)
+    direction_total_values = wind_df.groupby(wind_df.index.year)[WindDataFrameFormat.WIND_DIRECTION].apply(
         count_total_values)
+    direction_missing_values = calculate_missing_value_count(direction_nan_count, direction_total_values,
+                                                             expected_hours_per_year)
+    direction_missing_data_ratio = calculate_data_missing_ratio(direction_missing_values, expected_hours_per_year)
+    direction_data_quality = categorize_data_quality_for_series(direction_missing_data_ratio)
 
     annual_stats = pd.DataFrame({
         # AnnualStatsDataFrame.EXPECTED_HOUR_COUNT: expected_hours_per_year,
-        # AnnualStatsDataFrame.WIND_SPEED_NAN_COUNT: nan_count_speed,
-        AnnualStatsDataFrame.WIND_SPEED_MISSING_VALUES: (expected_hours_per_year - total_values_speed) + nan_count_speed,
-        # AnnualStatsDataFrame.WIND_DIRECTION_NAN_COUNT: nan_count_direction,
-        AnnualStatsDataFrame.WIND_DIRECTION_MISSING_VALUES: (expected_hours_per_year - total_values_direction) + nan_count_direction,
-        AnnualStatsDataFrame.WIND_DATA_BOTH_NAN_COUNT: wind_df.groupby(wind_df.index.year).apply(count_both_nan_values),
+        # AnnualStatsDataFrame.WIND_SPEED_NAN_COUNT: speed_nan_count,
+        # AnnualStatsDataFrame.WIND_SPEED_MISSING_VALUES: speed_missing_values,
+        AnnualStatsDataFrame.WIND_SPEED_MISSING_RATIO: speed_missing_data_ratio,
+        AnnualStatsDataFrame.WIND_SPEED_DATA_QUALITY: speed_data_quality,
+        # AnnualStatsDataFrame.WIND_DIRECTION_NAN_COUNT: direction_nan_count,
+        # AnnualStatsDataFrame.WIND_DIRECTION_MISSING_VALUES: direction_missing_values,
+        AnnualStatsDataFrame.WIND_DIRECTION_MISSING_RATIO: direction_missing_data_ratio,
+        AnnualStatsDataFrame.WIND_DIRECTION_DATA_QUALITY: direction_data_quality,
         AnnualStatsDataFrame.WIND_SPEED_MEAN: calculate_annual_average_wind_speed(wind_df),
         AnnualStatsDataFrame.WIND_SPEED_MEDIAN: calculate_annual_median_wind_speed(wind_df),
         AnnualStatsDataFrame.WIND_SPEED_MINIMUM: calculate_annual_minimum_wind_speed(wind_df),
