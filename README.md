@@ -63,10 +63,9 @@ wind_data_analysis/
 │   │   └── wind_monthly.py
 │   ├── constants.py
 │   ├── data_loader.py
-│   ├── visualization.py
-│   └── wind_analysis.py
+│   ├── utils.py
+│   └── visualization.py
 ├── README.md
 ├── main.py
 └── requirements.txt
-
 ```

@@ -18,8 +18,6 @@ LOCAL_VISUALISED_DATA_FOLDER = "visualisations"
 PROCESSED_DATA_PREFIX = "wind_hourly"
 ANALYSED_DATA_QUALITY_PREFIX = "data_quality"
 ANALYSED_DATA_PREFIX = "wind_statistics"
-FILE_NAME_ANNUAL_STATISTICS = "annual_wind_statistics.csv"
-
 
 # DWD data format constants
 class DWDFormat:
@@ -59,16 +57,6 @@ class DataQualityStatsDataFrame:
 
 class AnnualStatsDataFrame:
     INDEX = "year"
-    EXPECTED_HOUR_COUNT = "expected_hours"
-    WIND_SPEED_NAN_COUNT = "speed_nans"
-    WIND_SPEED_MISSING_VALUES = "speed_missing_values"
-    WIND_SPEED_MISSING_RATIO = "speed_missing_ratio"
-    WIND_SPEED_DATA_QUALITY = "speed_data_quality"
-    WIND_DIRECTION_NAN_COUNT = "direction_nans"
-    WIND_DIRECTION_MISSING_VALUES = "direction_missing_values"
-    WIND_DIRECTION_MISSING_RATIO = "direction_missing_ratio"
-    WIND_DIRECTION_DATA_QUALITY = "direction_data_quality"
-    WIND_DATA_BOTH_NAN_COUNT = "both_nans"
     WIND_SPEED_MEAN = "speed_mean"
     WIND_SPEED_MEDIAN = "speed_median"
     WIND_SPEED_MINIMUM = "speed_min"
